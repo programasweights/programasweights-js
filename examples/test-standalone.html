@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PAW Browser Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f9fafb; padding: 2rem; max-width: 600px; margin: 0 auto; }
+    h1 { font-size: 1.25rem; margin-bottom: 0.25rem; }
+    .sub { color: #6b7280; font-size: 0.85rem; margin-bottom: 1.5rem; }
+    .card { background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
+    label { display: block; font-size: 0.8rem; font-weight: 600; color: #374151; margin-bottom: 0.4rem; }
+    textarea, input { width: 100%; padding: 0.6rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.85rem; font-family: inherit; }
+    textarea { resize: none; }
+    textarea:focus, input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
+    button { width: 100%; padding: 0.7rem; background: #111827; color: white; border: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; margin-top: 0.75rem; }
+    button:hover { background: #1f2937; }
+    button:disabled { opacity: 0.4; cursor: wait; }
+    .bar { height: 3px; background: #e5e7eb; border-radius: 2px; margin-top: 0.5rem; overflow: hidden; }
+    .fill { height: 100%; background: #3b82f6; width: 0%; transition: width 0.2s; }
+    #status { font-size: 0.75rem; color: #9ca3af; margin-top: 0.4rem; }
+    #output { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 0.6rem; font-family: 'SF Mono', Monaco, monospace; font-size: 0.85rem; white-space: pre-wrap; min-height: 1.5rem; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>PAW Browser Inference Test</h1>
+  <p class="sub">Loads GPT-2 base + LoRA adapter + KV cache. First load downloads ~117 MB; subsequent loads use cache.</p>
+
+  <div class="card">
+    <label>Program ID (GPT-2)</label>
+    <input id="pid" value="6db7ebf725842d7d987c">
+    <div style="font-size:0.7rem;color:#9ca3af;margin-top:0.25rem">A sentiment classifier program. Try others from the hub.</div>
+
+    <label style="margin-top:0.75rem">Input</label>
+    <textarea id="input" rows="3">I love this product, it works great!</textarea>
+
+    <button id="btn" disabled>Loading everything...</button>
+    <div class="bar"><div class="fill" id="fill"></div></div>
+    <div id="status">Initializing...</div>
+  </div>
+
+  <div class="card hidden" id="out-card">
+    <label>Output</label>
+    <div id="output"></div>
+    <div id="timing" style="font-size:0.7rem;color:#9ca3af;margin-top:0.4rem"></div>
+  </div>
+
+  <script type="module">
+    const WLLAMA_CDN = 'https://cdn.jsdelivr.net/gh/da03/wllama@f8b7d6b28696d0f9575f82df7a54de3adc6ea49c/esm';
+    const { Wllama } = await import(`${WLLAMA_CDN}/index.js`);
+
+    const $ = id => document.getElementById(id);
+    const btn = $('btn'), statusEl = $('status'), fill = $('fill');
+
+    const HF_BASE = 'https://huggingface.co';
+    const BASE_MODEL_URL = `${HF_BASE}/yuntian-deng/GPT2-GGUF-Q6_K/resolve/main/gpt2-q6_k.gguf`;
+    const PROGRAMS_REPO = 'yuntian-deng/paw-programs';
+
+    let wllama = null;
+    let prefixTokenCount = 0;
+    let promptPrefix = '';
+    let promptSuffix = '';
+
+    async function fetchWithProgress(url, label) {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`${label} download failed: ${resp.status}`);
+      const total = parseInt(resp.headers.get('content-length') || '0');
+      const reader = resp.body.getReader();
+      const chunks = [];
+      let loaded = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded += value.byteLength;
+        if (total > 1e6) {
+          const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+          fill.style.width = pct + '%';
+          statusEl.textContent = `${label}... ${pct}% (${(loaded/1e6).toFixed(1)} MB)`;
+        }
+      }
+      return new Blob(chunks);
+    }
+
+    async function init() {
+      const pid = $('pid').value.trim();
+
+      const WasmPaths = {
+        'single-thread/wllama.wasm': `${WLLAMA_CDN}/single-thread/wllama.wasm`,
+        'multi-thread/wllama.wasm': `${WLLAMA_CDN}/multi-thread/wllama.wasm`,
+      };
+      wllama = new Wllama(WasmPaths, { suppressNativeLog: false });
+
+      // Step 1: Download base model
+      statusEl.textContent = 'Downloading GPT-2 base model (~105 MB)...';
+      const baseBlob = await fetchWithProgress(BASE_MODEL_URL, 'Base model');
+      statusEl.textContent = 'Loading model into WASM...';
+      await wllama.loadModel([baseBlob], { n_ctx: 2048 });
+      console.log('Base model loaded');
+
+      // Step 2: Download and apply LoRA adapter
+      statusEl.textContent = 'Downloading LoRA adapter (~5 MB)...';
+      const adapterUrl = `${HF_BASE}/${PROGRAMS_REPO}/resolve/main/${pid}/adapter.gguf`;
+      const adapterId = await wllama.loadLoraAdapter(adapterUrl);
+      console.log('LoRA loaded, adapter_id:', adapterId);
+
+      // Step 3: Download prompt template
+      statusEl.textContent = 'Downloading prompt template...';
+      const promptResp = await fetch(`${HF_BASE}/${PROGRAMS_REPO}/resolve/main/${pid}/prompt_template.txt`);
+      if (!promptResp.ok) throw new Error(`Prompt not found (${promptResp.status})`);
+      const template = await promptResp.text();
+      const parts = template.split('{INPUT_PLACEHOLDER}');
+      promptPrefix = parts[0];
+      promptSuffix = parts.length > 1 ? parts[1] : '';
+
+      // Step 4: Download and load prefix cache
+      statusEl.textContent = 'Downloading prefix cache (~7 MB)...';
+      try {
+        const [cacheResp, tokensResp] = await Promise.all([
+          fetch(`${HF_BASE}/${PROGRAMS_REPO}/resolve/main/${pid}/prefix_cache.bin`),
+          fetch(`${HF_BASE}/${PROGRAMS_REPO}/resolve/main/${pid}/prefix_tokens.json`),
+        ]);
+        if (cacheResp.ok && tokensResp.ok) {
+          const cacheBlob = await cacheResp.blob();
+          const prefixTokens = await tokensResp.json();
+          prefixTokenCount = await wllama.loadSession(cacheBlob, prefixTokens);
+          console.log(`Prefix cache loaded: ${prefixTokenCount} tokens`);
+        } else {
+          console.warn('Prefix cache not available');
+        }
+      } catch (err) {
+        console.warn('Prefix cache failed:', err);
+      }
+
+      fill.style.width = '100%';
+      const cacheMsg = prefixTokenCount > 0
+        ? `Ready! Prefix cached (${prefixTokenCount} tokens). Inference should be ~200ms.`
+        : 'Ready! (no prefix cache — first call will be ~1.6s)';
+      statusEl.textContent = cacheMsg;
+      btn.disabled = false;
+      btn.textContent = 'Run';
+    }
+
+    btn.onclick = async () => {
+      const input = $('input').value.trim();
+      if (!input) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Running...';
+
+      try {
+        const t0 = performance.now();
+
+        const cacheMode = prefixTokenCount > 0 ? 'prefix cached' : 'full prefill';
+        statusEl.textContent = `Running inference (${cacheMode})...`;
+
+        // Always use full prompt + createCompletion with useCache.
+        // If prefix KV is loaded, wllama skips already-cached tokens automatically.
+        const fullPrompt = promptPrefix + input + promptSuffix;
+        const output = await wllama.createCompletion(fullPrompt, {
+          nPredict: 32,
+          useCache: true,
+          sampling: { temp: 0, top_k: 40, top_p: 0.9 },
+        });
+        const elapsed = Math.round(performance.now() - t0);
+        $('output').textContent = output.trim() || '(empty output)';
+        $('timing').textContent = `${elapsed}ms (${cacheMode})`;
+
+        $('out-card').classList.remove('hidden');
+        statusEl.textContent = `Done! ${$('timing').textContent}`;
+      } catch (e) {
+        console.error('Run failed:', e);
+        statusEl.textContent = `Error: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run';
+      }
+    };
+
+    init().catch(e => {
+      console.error('Init failed:', e);
+      statusEl.textContent = `Init error: ${e.message}`;
+    });
+  </script>
+</body>
+</html>

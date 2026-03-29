@@ -1,0 +1,54 @@
+{
+  "name": "@programasweights/web",
+  "version": "0.1.0",
+  "description": "Run PAW (Programs as Weights) neural programs in the browser via WebAssembly",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ __tests__/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "neural-programs",
+    "llm",
+    "lora",
+    "browser-inference",
+    "wasm",
+    "gpt2",
+    "programasweights",
+    "paw"
+  ],
+  "author": "Yuntian Deng",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yuntian-group/programasweights"
+  },
+  "homepage": "https://programasweights.com",
+  "dependencies": {
+    "@wllama/wllama": "github:da03/wllama"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "eslint": "^9.0.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0",
+    "@playwright/test": "^1.48.0"
+  }
+}
