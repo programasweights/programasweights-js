@@ -38,11 +38,14 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yuntian-group/programasweights"
+    "url": "https://github.com/programasweights/programasweights-js"
   },
-  "homepage": "https://programasweights.com",
+  "bugs": {
+    "url": "https://github.com/programasweights/programasweights-js/issues"
+  },
+  "homepage": "https://programasweights.com/browser",
   "dependencies": {
-    "@wllama/wllama": "github:da03/wllama"
+    "@wllama/wllama": "github:programasweights/wllama"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

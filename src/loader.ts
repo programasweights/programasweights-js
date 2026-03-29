@@ -1,12 +1,12 @@
 import type { ProgramAssets, ProgramMeta, ProgressCallback } from './types';
 
 const DEFAULT_API_URL = 'https://programasweights.com/api/v1';
-const HF_PROGRAMS_REPO = 'yuntian-deng/paw-programs';
+const HF_PROGRAMS_REPO = 'programasweights/paw-programs';
 const HF_BASE_URL = 'https://huggingface.co';
 
 const HF_BASE_MODELS: Record<string, { repo: string; file: string }> = {
   gpt2: {
-    repo: 'yuntian-deng/GPT2-GGUF-Q6_K',
+    repo: 'programasweights/GPT2-GGUF-Q6_K',
     file: 'gpt2-q6_k.gguf',
   },
 };

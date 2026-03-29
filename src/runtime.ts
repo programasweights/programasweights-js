@@ -3,7 +3,7 @@ import type { ProgramAssets, LoadOptions } from './types';
 import { getBaseModelUrl } from './loader';
 
 const WLLAMA_COMMIT = 'f8b7d6b28696d0f9575f82df7a54de3adc6ea49c';
-const PAW_WASM_CDN_BASE = `https://cdn.jsdelivr.net/gh/da03/wllama@${WLLAMA_COMMIT}/esm`;
+const PAW_WASM_CDN_BASE = `https://cdn.jsdelivr.net/gh/programasweights/wllama@${WLLAMA_COMMIT}/esm`;
 
 const WASM_PATHS = {
   'single-thread/wllama.wasm': `${PAW_WASM_CDN_BASE}/single-thread/wllama.wasm`,

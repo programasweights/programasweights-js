@@ -48,15 +48,15 @@
   </div>
 
   <script type="module">
-    const WLLAMA_CDN = 'https://cdn.jsdelivr.net/gh/da03/wllama@f8b7d6b28696d0f9575f82df7a54de3adc6ea49c/esm';
+    const WLLAMA_CDN = 'https://cdn.jsdelivr.net/gh/programasweights/wllama@f8b7d6b28696d0f9575f82df7a54de3adc6ea49c/esm';
     const { Wllama } = await import(`${WLLAMA_CDN}/index.js`);
 
     const $ = id => document.getElementById(id);
     const btn = $('btn'), statusEl = $('status'), fill = $('fill');
 
     const HF_BASE = 'https://huggingface.co';
-    const BASE_MODEL_URL = `${HF_BASE}/yuntian-deng/GPT2-GGUF-Q6_K/resolve/main/gpt2-q6_k.gguf`;
-    const PROGRAMS_REPO = 'yuntian-deng/paw-programs';
+    const BASE_MODEL_URL = `${HF_BASE}/programasweights/GPT2-GGUF-Q6_K/resolve/main/gpt2-q6_k.gguf`;
+    const PROGRAMS_REPO = 'programasweights/paw-programs';
 
     let wllama = null;
     let prefixTokenCount = 0;
