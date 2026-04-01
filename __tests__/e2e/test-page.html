@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>PAW Web SDK E2E Test</title>
+</head>
+<body>
+  <h1>PAW Web SDK E2E Test Page</h1>
+  <pre id="log"></pre>
+  <script type="module">
+    // Use the CDN version of wllama (same approach as the real BrowserPage)
+    const WLLAMA_CDN = 'https://cdn.jsdelivr.net/gh/programasweights/wllama@f8b7d6b28696d0f9575f82df7a54de3adc6ea49c/esm';
+    const API_URL = 'https://programasweights.com/api/v1';
+    const HF_BASE = 'https://huggingface.co';
+    const HF_REPO = 'programasweights/paw-programs';
+
+    // Minimal inline SDK that mirrors the npm package behavior
+    const paw = {
+      async function(slugOrId, opts = {}) {
+        const isHash = /^[a-f0-9]{16,64}$/.test(slugOrId);
+        let programId = slugOrId;
+
+        if (!isHash) {
+          const resp = await fetch(`${API_URL}/programs/resolve/${encodeURIComponent(slugOrId)}`);
+          if (!resp.ok) throw new Error(`Failed to resolve "${slugOrId}": ${resp.status}`);
+          const data = await resp.json();
+          programId = data.program_id;
+        }
+
+        // Load program details from API
+        const detailResp = await fetch(`${API_URL}/programs/${programId}`);
+        if (!detailResp.ok) throw new Error(`Failed to load program: ${detailResp.status}`);
+        const detail = await detailResp.json();
+        if (detail.interpreter !== 'gpt2') throw new Error(`Browser only supports GPT-2, got "${detail.interpreter}"`);
+
+        const meta = {
+          program_id: detail.id,
+          spec: detail.spec,
+          interpreter: detail.interpreter,
+          compiler_snapshot: detail.compiler_snapshot,
+        };
+
+        // Load prompt template from HF
+        const promptResp = await fetch(`${HF_BASE}/${HF_REPO}/resolve/main/${programId}/prompt_template.txt`);
+        if (!promptResp.ok) throw new Error(`Failed to load prompt: ${promptResp.status}`);
+        const promptTemplate = await promptResp.text();
+
+        // Init wllama
+        const { Wllama } = await import(`${WLLAMA_CDN}/index.js`);
+        if (!window._wllama) {
+          const wllama = new Wllama({
+            'single-thread/wllama.wasm': `${WLLAMA_CDN}/single-thread/wllama.wasm`,
+            'multi-thread/wllama.wasm': `${WLLAMA_CDN}/multi-thread/wllama.wasm`,
+          }, { suppressNativeLog: true });
+
+          const baseResp = await fetch('https://huggingface.co/programasweights/GPT2-GGUF-Q6_K/resolve/main/gpt2-q6_k.gguf');
+          const total = parseInt(baseResp.headers.get('content-length') || '0');
+          const reader = baseResp.body.getReader();
+          const chunks = [];
+          let loaded = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            loaded += value.byteLength;
+            if (opts.onProgress) opts.onProgress({ loaded, total, stage: 'base-model' });
+          }
+          await wllama.loadModel([new Blob(chunks)], { n_ctx: 2048 });
+          window._wllama = wllama;
+        }
+
+        const wllama = window._wllama;
+        const adapterUrl = `${HF_BASE}/${HF_REPO}/resolve/main/${programId}/adapter.gguf`;
+        const adapterId = await wllama.loadLoraAdapter(adapterUrl, { scale: opts.scale ?? 1.0 });
+
+        // Load prefix cache
+        let prefixTokenCount = 0;
+        try {
+          const [cacheResp, tokResp] = await Promise.all([
+            fetch(`${HF_BASE}/${HF_REPO}/resolve/main/${programId}/prefix_cache.bin`),
+            fetch(`${HF_BASE}/${HF_REPO}/resolve/main/${programId}/prefix_tokens.json`),
+          ]);
+          if (cacheResp.ok && tokResp.ok) {
+            const cacheBlob = await cacheResp.blob();
+            const tokens = await tokResp.json();
+            prefixTokenCount = await wllama.loadSession(cacheBlob, tokens);
+          }
+        } catch {}
+
+        const parts = promptTemplate.split('{INPUT_PLACEHOLDER}');
+        const prefix = parts[0];
+        const suffix = parts.length > 1 ? parts[1] : '';
+
+        const callable = async (input) => {
+          if (prefixTokenCount > 0) await wllama.kvRemove(prefixTokenCount, -1);
+          const result = await wllama.createCompletion(prefix + input + suffix, {
+            nPredict: opts.maxTokens ?? 512,
+            useCache: true,
+            sampling: { temp: opts.temperature ?? 0 },
+          });
+          return result.trim();
+        };
+        callable.free = async () => { await wllama.freeLoraAdapter(adapterId); };
+        callable.spec = meta.spec;
+        callable.programId = meta.program_id;
+        callable.interpreter = meta.interpreter;
+        return callable;
+      },
+      configure(config) {
+        // API URL config (not needed for E2E since we use production)
+      }
+    };
+
+    window.paw = paw;
+    window.testLog = [];
+    window.log = (msg) => {
+      window.testLog.push(msg);
+      document.getElementById('log').textContent += msg + '\n';
+    };
+    window.log('SDK loaded');
+  </script>
+</body>
+</html>

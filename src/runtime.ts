@@ -66,11 +66,13 @@ export class PawFunction {
   private promptSuffix = '';
   private maxTokens: number;
   private temperature: number;
+  private scale: number;
 
   constructor(assets: ProgramAssets, opts: LoadOptions = {}) {
     this.assets = assets;
     this.maxTokens = opts.maxTokens ?? 512;
     this.temperature = opts.temperature ?? 0;
+    this.scale = opts.scale ?? 1.0;
 
     const placeholder = '{INPUT_PLACEHOLDER}';
     const parts = assets.promptTemplate.split(placeholder);
@@ -82,7 +84,7 @@ export class PawFunction {
     this.wllama = await getOrInitWllama(this.assets.meta.interpreter, onProgress);
 
     this.adapterId = await this.wllama.loadLoraAdapter(this.assets.adapterUrl, {
-      scale: 1.0,
+      scale: this.scale,
     });
 
     try {

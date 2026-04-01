@@ -30,9 +30,10 @@ async function loadFunction(
   slugOrId: string,
   opts: LoadOptions = {}
 ): Promise<(input: string) => Promise<string>> {
-  const programId = slugOrId.includes('/')
-    ? await resolveSlug(slugOrId)
-    : slugOrId;
+  const isHash = /^[a-f0-9]{16,64}$/.test(slugOrId);
+  const programId = isHash
+    ? slugOrId
+    : await resolveSlug(slugOrId);
 
   const assets = await loadProgramAssets(programId, opts.onProgress);
   const fn = new PawFunction(assets, opts);
