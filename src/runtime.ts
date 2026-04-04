@@ -64,13 +64,13 @@ export class PawFunction {
   private prefixTokenCount = 0;
   private promptPrefix = '';
   private promptSuffix = '';
-  private maxTokens: number;
+  private defaultMaxTokens: number | undefined;
   private temperature: number;
   private scale: number;
 
   constructor(assets: ProgramAssets, opts: LoadOptions = {}) {
     this.assets = assets;
-    this.maxTokens = opts.maxTokens ?? 512;
+    this.defaultMaxTokens = opts.maxTokens;
     this.temperature = opts.temperature ?? 0;
     this.scale = opts.scale ?? 1.0;
 
@@ -103,7 +103,7 @@ export class PawFunction {
     }
   }
 
-  async run(input: string): Promise<string> {
+  async run(input: string, maxTokens?: number): Promise<string> {
     if (!this.wllama) {
       throw new Error('PawFunction not initialized. Call init() first.');
     }
@@ -112,9 +112,10 @@ export class PawFunction {
       await this.wllama.kvRemove(this.prefixTokenCount, -1);
     }
 
+    const limit = maxTokens ?? this.defaultMaxTokens ?? 2048;
     const fullPrompt = this.promptPrefix + input + this.promptSuffix;
     const output = await this.wllama.createCompletion(fullPrompt, {
-      nPredict: this.maxTokens,
+      nPredict: limit,
       useCache: true,
       sampling: { temp: this.temperature },
     });

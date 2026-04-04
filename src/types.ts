@@ -33,3 +33,15 @@ export interface ProgramAssets {
   prefixCacheUrl: string;
   prefixTokensUrl: string;
 }
+
+/**
+ * A loaded PAW function that can be called with a text input.
+ * Returned by `paw.function()`.
+ */
+export interface PawCallable {
+  (input: string, maxTokens?: number): Promise<string>;
+  free(): Promise<void>;
+  readonly spec: string;
+  readonly programId: string;
+  readonly interpreter: string;
+}

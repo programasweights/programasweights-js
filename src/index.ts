@@ -1,8 +1,8 @@
 import { resolveSlug, loadProgramAssets, setApiUrl } from './loader';
 import { PawFunction } from './runtime';
-import type { PawConfig, LoadOptions, ProgressCallback, ProgramMeta } from './types';
+import type { PawConfig, LoadOptions, ProgressCallback, ProgramMeta, PawCallable } from './types';
 
-export type { PawConfig, LoadOptions, ProgressCallback, ProgramMeta, PawFunction };
+export type { PawConfig, LoadOptions, ProgressCallback, ProgramMeta, PawFunction, PawCallable };
 
 export function configure(config: PawConfig): void {
   if (config.apiUrl) {
@@ -15,7 +15,7 @@ export function configure(config: PawConfig): void {
  *
  * Accepts a program ID (hash) or a slug (e.g., "programasweights/email-triage").
  * Downloads the base GPT-2 model (~105 MB, cached after first load) and the
- * program's LoRA adapter (~5 MB). Returns a callable PawFunction.
+ * program's LoRA adapter (~5 MB). Returns a callable PawCallable.
  *
  * @example
  * ```ts
@@ -24,26 +24,30 @@ export function configure(config: PawConfig): void {
  * const fn = await paw.function('programasweights/email-triage');
  * const result = await fn('Urgent: server is down!');
  * console.log(result); // "immediate"
+ *
+ * // Limit output length
+ * const short = await fn('Urgent: server is down!', 10);
  * ```
  */
 async function loadFunction(
   slugOrId: string,
   opts: LoadOptions = {}
-): Promise<(input: string) => Promise<string>> {
+): Promise<PawCallable> {
   const isHash = /^[a-f0-9]{16,64}$/.test(slugOrId);
   const programId = isHash
     ? slugOrId
     : await resolveSlug(slugOrId);
 
   const assets = await loadProgramAssets(programId, opts.onProgress);
-  const fn = new PawFunction(assets, opts);
-  await fn.init(opts.onProgress);
+  const pawFn = new PawFunction(assets, opts);
+  await pawFn.init(opts.onProgress);
 
-  const callable = (input: string) => fn.run(input);
-  callable.free = () => fn.free();
-  callable.spec = fn.spec;
-  callable.programId = fn.programId;
-  callable.interpreter = fn.interpreter;
+  const callable = ((input: string, maxTokens?: number) =>
+    pawFn.run(input, maxTokens)) as PawCallable;
+  callable.free = () => pawFn.free();
+  Object.defineProperty(callable, 'spec', { get: () => pawFn.spec });
+  Object.defineProperty(callable, 'programId', { get: () => pawFn.programId });
+  Object.defineProperty(callable, 'interpreter', { get: () => pawFn.interpreter });
   return callable;
 }
 

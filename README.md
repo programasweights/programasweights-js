@@ -36,6 +36,9 @@ const fn = await paw.function('abc123def456');
 // Run inference
 const result = await triage('Check this urgent message');
 
+// Limit output length (default: generates until EOS or context limit)
+const short = await triage('Check this', 10);
+
 // Show download progress
 const fn2 = await paw.function('programasweights/json-fixer', {
   onProgress: ({ loaded, total, stage }) => {
@@ -65,15 +68,26 @@ Loads a PAW program and returns a callable function.
 **Parameters:**
 - `slugOrId` — Program slug (e.g., `"programasweights/email-triage"`) or program ID hash
 - `options.onProgress` — Callback for download progress: `({ loaded, total, stage }) => void`
-- `options.maxTokens` — Maximum output tokens (default: 512)
+- `options.maxTokens` — Default max output tokens (default: unlimited, runs until EOS or context limit)
 - `options.temperature` — Sampling temperature, 0 = greedy (default: 0)
 
-**Returns:** `Promise<(input: string) => Promise<string>>` — an async callable function
+**Returns:** `Promise<PawCallable>` — an async callable with per-call options
 
-The returned function also has:
+```typescript
+const fn = await paw.function('programasweights/email-triage');
+
+// Default: generates until EOS or context limit
+const result = await fn('Urgent: server is down!');
+
+// Override max tokens per call
+const short = await fn('Urgent: server is down!', 5);
+```
+
+The returned callable also has:
 - `.free()` — releases the LoRA adapter (base model stays cached)
 - `.spec` — the program's original specification
 - `.programId` — the program's content-addressable ID
+- `.interpreter` — the interpreter name
 
 ### `paw.configure(config)`
 
