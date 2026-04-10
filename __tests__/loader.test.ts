@@ -31,7 +31,7 @@ describe('getBaseModelUrl', () => {
   it('returns correct URL for gpt2', () => {
     const url = getBaseModelUrl('gpt2');
     expect(url).toBe(
-      'https://huggingface.co/programasweights/GPT2-GGUF-Q6_K/resolve/main/gpt2-q6_k.gguf'
+      'https://huggingface.co/programasweights/GPT2-GGUF-Q8_0/resolve/main/gpt2-q8_0.gguf'
     );
   });
 

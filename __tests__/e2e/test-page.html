@@ -52,7 +52,7 @@
             'multi-thread/wllama.wasm': `${WLLAMA_CDN}/multi-thread/wllama.wasm`,
           }, { suppressNativeLog: true });
 
-          const baseResp = await fetch('https://huggingface.co/programasweights/GPT2-GGUF-Q6_K/resolve/main/gpt2-q6_k.gguf');
+          const baseResp = await fetch('https://huggingface.co/programasweights/GPT2-GGUF-Q8_0/resolve/main/gpt2-q8_0.gguf');
           const total = parseInt(baseResp.headers.get('content-length') || '0');
           const reader = baseResp.body.getReader();
           const chunks = [];

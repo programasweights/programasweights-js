@@ -6,8 +6,8 @@ const HF_BASE_URL = 'https://huggingface.co';
 
 const HF_BASE_MODELS: Record<string, { repo: string; file: string }> = {
   gpt2: {
-    repo: 'programasweights/GPT2-GGUF-Q6_K',
-    file: 'gpt2-q6_k.gguf',
+    repo: 'programasweights/GPT2-GGUF-Q8_0',
+    file: 'gpt2-q8_0.gguf',
   },
 };
 
