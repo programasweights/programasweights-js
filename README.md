@@ -1,8 +1,8 @@
 # @programasweights/web
 
-Run [PAW (Programs as Weights)](https://programasweights.com) neural programs directly in the browser. No server required.
+Run [PAW (Programs as Weights)](https://programasweights.com) neural programs directly in the browser. No custom server required for inference.
 
-PAW compiles natural language specifications into tiny neural programs. This SDK runs them client-side via WebAssembly, using a shared GPT-2 base model (105 MB, cached after first load) and per-program LoRA adapters (~5 MB each).
+PAW compiles natural language specifications into tiny neural programs. This SDK runs them client-side via WebAssembly, using a shared GPT-2 base model (134 MB, cached after first load) and per-program assets (~12 MB total: ~5 MB LoRA adapter + ~7 MB prefix cache).
 
 ## Quick Start
 
@@ -10,7 +10,7 @@ PAW compiles natural language specifications into tiny neural programs. This SDK
 <script type="module">
   import paw from 'https://cdn.jsdelivr.net/npm/@programasweights/web';
 
-  const fn = await paw.function('programasweights/email-triage');
+  const fn = await paw.function('email-triage-browser');
   const result = await fn('Urgent: server is down!');
   console.log(result); // "immediate"
 </script>
@@ -27,8 +27,8 @@ npm install @programasweights/web
 ```typescript
 import paw from '@programasweights/web';
 
-// Load by slug (resolves via API)
-const triage = await paw.function('programasweights/email-triage');
+// Load by slug (resolves via the PAW API)
+const triage = await paw.function('email-triage-browser');
 
 // Load by program ID (direct, no API call needed)
 const fn = await paw.function('abc123def456');
@@ -40,7 +40,7 @@ const result = await triage('Check this urgent message');
 const short = await triage('Check this', 10);
 
 // Show download progress
-const fn2 = await paw.function('programasweights/json-fixer', {
+const fn2 = await paw.function('email-triage-browser', {
   onProgress: ({ loaded, total, stage }) => {
     console.log(`${stage}: ${Math.round(loaded/total*100)}%`);
   },
@@ -52,12 +52,14 @@ await fn2.free();
 
 ## How It Works
 
-1. **First call**: downloads the GPT-2 Q6_K base model (~105 MB) and caches it in IndexedDB
-2. **Per program**: downloads only the LoRA adapter (~5 MB) from HuggingFace CDN
+1. **First call**: downloads the GPT-2 Q8_0 base model (~134 MB) and caches it in IndexedDB
+2. **Per program**: downloads the program assets (~12 MB total: ~5 MB LoRA adapter + ~7 MB prefix cache) from Hugging Face CDN
 3. **Inference**: runs entirely in the browser via WebAssembly (llama.cpp compiled to WASM)
 4. **Subsequent visits**: base model loads from cache instantly
 
-Multiple programs share one cached base model. Loading a second program is just a 5 MB download.
+Multiple programs share one cached base model. Loading a second program is just a ~12 MB download.
+
+If you load a program by content-addressable ID, the browser runtime only depends on Hugging Face-hosted assets. Slugs still need the PAW API for the initial ID lookup.
 
 ## API Reference
 
@@ -66,7 +68,7 @@ Multiple programs share one cached base model. Loading a second program is just 
 Loads a PAW program and returns a callable function.
 
 **Parameters:**
-- `slugOrId` — Program slug (e.g., `"programasweights/email-triage"`) or program ID hash
+- `slugOrId` — Program slug (for example `"email-triage-browser"`) or program ID hash
 - `options.onProgress` — Callback for download progress: `({ loaded, total, stage }) => void`
 - `options.maxTokens` — Default max output tokens (default: unlimited, runs until EOS or context limit)
 - `options.temperature` — Sampling temperature, 0 = greedy (default: 0)
@@ -74,7 +76,7 @@ Loads a PAW program and returns a callable function.
 **Returns:** `Promise<PawCallable>` — an async callable with per-call options
 
 ```typescript
-const fn = await paw.function('programasweights/email-triage');
+const fn = await paw.function('email-triage-browser');
 
 // Default: generates until EOS or context limit
 const result = await fn('Urgent: server is down!');

@@ -26,7 +26,7 @@
 </head>
 <body>
   <h1>PAW Browser Inference Test</h1>
-  <p class="sub">Loads GPT-2 base + LoRA adapter + KV cache. First load downloads ~117 MB; subsequent loads use cache.</p>
+  <p class="sub">Loads GPT-2 base + LoRA adapter + KV cache. First load downloads ~146 MB; subsequent loads use cache.</p>
 
   <div class="card">
     <label>Program ID (GPT-2)</label>
@@ -94,7 +94,7 @@
       wllama = new Wllama(WasmPaths, { suppressNativeLog: false });
 
       // Step 1: Download base model
-      statusEl.textContent = 'Downloading GPT-2 base model (~105 MB)...';
+      statusEl.textContent = 'Downloading GPT-2 base model (~134 MB)...';
       const baseBlob = await fetchWithProgress(BASE_MODEL_URL, 'Base model');
       statusEl.textContent = 'Loading model into WASM...';
       await wllama.loadModel([baseBlob], { n_ctx: 2048 });

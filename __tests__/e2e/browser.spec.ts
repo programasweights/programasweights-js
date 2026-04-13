@@ -2,12 +2,12 @@
  * Browser E2E tests for @programasweights/web SDK.
  *
  * Runs real browser inference via Playwright + COOP/COEP test server.
- * Downloads the 105MB GPT-2 base model on first run (cached after).
+ * Downloads the 134MB GPT-2 base model on first run (cached after).
  */
 import { test, expect, type Page } from '@playwright/test';
 
 const TEST_URL = 'http://localhost:9876';
-const KNOWN_GPT2_HASH = '3b4e38680509be51f0ff';
+const KNOWN_GPT2_HASH = 'd34792fc9654c0a41483';
 const LOAD_TIMEOUT = 180_000;
 
 async function loadProgram(
@@ -50,8 +50,8 @@ test.beforeEach(async ({ page }) => {
 // ── Loading programs ──
 
 test.describe('Loading programs', () => {
-  test.skip('load by slug', async ({ page }) => {
-    await loadProgram(page, 'email-triage');
+  test('load by slug', async ({ page }) => {
+    await loadProgram(page, 'da03/verb-counter');
     const hasFn = await page.evaluate(() => typeof (window as any)._fn === 'function');
     expect(hasFn).toBe(true);
   });

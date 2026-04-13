@@ -2,6 +2,7 @@ import type { ProgramAssets, ProgramMeta, ProgressCallback, RuntimeBaseModel, Ru
 
 const DEFAULT_API_URL = 'https://programasweights.com/api/v1';
 const HF_BASE_URL = 'https://huggingface.co';
+const HF_PROGRAMS_REPO = 'programasweights/paw-programs';
 const ASSET_READY_TIMEOUT_MS = 60_000;
 const ASSET_READY_POLL_MS = 2_000;
 
@@ -79,11 +80,11 @@ export function getBaseModelUrl(runtime: RuntimeManifest): string {
 }
 
 function getProgramAssetUrl(programId: string, filename: string): string {
-  return `${configuredApiUrl}/programs/${encodeURIComponent(programId)}/asset/${encodeURIComponent(filename)}`;
+  return `${HF_BASE_URL}/${HF_PROGRAMS_REPO}/resolve/main/${programId}/${filename}`;
 }
 
-function getProgramUrl(programId: string): string {
-  return `${configuredApiUrl}/programs/${encodeURIComponent(programId)}`;
+function getMetaUrl(programId: string): string {
+  return getProgramAssetUrl(programId, 'meta.json');
 }
 
 function getPromptUrl(programId: string, promptFilename = 'prompt_template.txt'): string {
@@ -130,14 +131,6 @@ export async function resolveSlug(slug: string): Promise<string> {
   return data.program_id;
 }
 
-async function getProgramDetail(programId: string): Promise<any> {
-  const resp = await fetch(getProgramUrl(programId));
-  if (!resp.ok) {
-    throw new Error(`Failed to load program metadata for "${programId}": ${resp.status}`);
-  }
-  return resp.json();
-}
-
 async function waitForAssetReady(url: string, label: string, optional = false): Promise<void> {
   const deadline = Date.now() + ASSET_READY_TIMEOUT_MS;
   let lastStatus = 0;
@@ -163,25 +156,12 @@ export async function loadProgramAssets(
   programId: string,
   _onProgress?: ProgressCallback
 ): Promise<ProgramAssets> {
-  const detail = await getProgramDetail(programId);
-  const meta: ProgramMeta = {
-    version: detail.runtime_manifest_version ?? 4,
-    program_id: detail.id,
-    spec: detail.spec,
-    examples: detail.runtime?.examples ?? detail.examples,
-    interpreter: detail.interpreter,
-    compiler_snapshot: detail.compiler_snapshot,
-    compiler_fingerprint: detail.compiler_fingerprint ?? '',
-    compiler_kind: detail.compiler_kind,
-    pseudo_program_strategy: detail.pseudo_program_strategy,
-    runtime_id: detail.runtime_id,
-    runtime_manifest_version: detail.runtime_manifest_version,
-    runtime: detail.runtime,
-    lora_rank: detail.runtime?.adapter?.lora_rank ?? 0,
-    lora_alpha: detail.runtime?.adapter?.lora_alpha ?? 0,
-    prefix_steps: detail.prefix_steps ?? 0,
-    created_at: detail.created_at,
-  };
+  await waitForAssetReady(getMetaUrl(programId), 'program metadata');
+  const metaResp = await fetch(getMetaUrl(programId));
+  if (!metaResp.ok) {
+    throw new Error(`Failed to load program metadata for "${programId}": ${metaResp.status}`);
+  }
+  const meta: ProgramMeta = await metaResp.json();
   const runtime = await resolveRuntimeManifest(meta);
 
   if (!runtime.js_sdk.supported) {

@@ -1,6 +1,6 @@
 {
   "name": "@programasweights/web",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Run PAW (Programs as Weights) neural programs in the browser via WebAssembly",
   "type": "module",
   "main": "dist/index.js",

@@ -25,11 +25,11 @@
 </head>
 <body>
   <h1>PAW Browser Inference</h1>
-  <p class="subtitle">Run neural programs locally in your browser — no server needed.</p>
+  <p class="subtitle">Run neural programs locally in your browser — no custom server needed for inference.</p>
 
   <div class="card">
     <label for="program">Program</label>
-    <input id="program" type="text" value="programasweights/email-triage"
+    <input id="program" type="text" value="email-triage-browser"
       style="width:100%; padding:0.75rem; border:1px solid #ddd; border-radius:8px; font-size:0.9rem;"
       placeholder="Program slug or ID">
 
@@ -68,7 +68,7 @@
 
       btnRun.disabled = true;
       btnRun.textContent = 'Loading model...';
-      elStatus.textContent = 'Downloading base model (first time only, ~105 MB)...';
+      elStatus.textContent = 'Downloading base model (first time only, ~134 MB)...';
 
       try {
         fn = await paw.function(slug, {

@@ -13,7 +13,7 @@ export function configure(config: PawConfig): void {
 /**
  * Load a PAW program for browser-side inference.
  *
- * Accepts a program ID (hash) or a slug (e.g., "email-triage").
+ * Accepts a program ID (hash) or a slug (e.g., "email-triage-browser").
  * Downloads the base GPT-2 model (~134 MB, cached after first load) and the
  * program's browser assets (~12 MB total: ~5 MB adapter + ~7 MB prefix cache).
  * Returns a callable PawCallable.
@@ -22,7 +22,7 @@ export function configure(config: PawConfig): void {
  * ```ts
  * import paw from '@programasweights/web';
  *
- * const fn = await paw.function('email-triage');
+ * const fn = await paw.function('email-triage-browser');
  * const result = await fn('Urgent: server is down!');
  * console.log(result); // "immediate"
  *

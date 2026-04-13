@@ -137,10 +137,12 @@ npm install @programasweights/web
 ```javascript
 import paw from '@programasweights/web';
 
-const fn = await paw.function('programasweights/email-triage');
+const fn = await paw.function('email-triage-browser');
 const result = await fn('Urgent: server is down!');
 // result: "immediate"
 ```
+
+If you load by program ID instead of slug, browser inference depends only on Hugging Face-hosted assets at runtime.
 
 ## Authentication (optional)
 
