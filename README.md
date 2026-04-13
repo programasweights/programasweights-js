@@ -61,6 +61,8 @@ Multiple programs share one cached base model. Loading a second program is just 
 
 If you load a program by content-addressable ID, the browser runtime only depends on Hugging Face-hosted assets. Slugs still need the PAW API for the initial ID lookup.
 
+New browser-compatible programs are uploaded to Hugging Face asynchronously after compile. They are usually ready within a minute or two, but under load can take a few minutes. The browser SDK polls asset readiness automatically and may need a short wait right after a fresh compile.
+
 ## API Reference
 
 ### `paw.function(slugOrId, options?)`
