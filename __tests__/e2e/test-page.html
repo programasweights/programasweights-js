@@ -10,9 +10,6 @@
     // Use the CDN version of wllama (same approach as the real BrowserPage)
     const WLLAMA_CDN = 'https://cdn.jsdelivr.net/gh/programasweights/wllama@f8b7d6b28696d0f9575f82df7a54de3adc6ea49c/esm';
     const API_URL = 'https://programasweights.com/api/v1';
-    const HF_BASE = 'https://huggingface.co';
-    const HF_REPO = 'programasweights/paw-programs';
-
     // Minimal inline SDK that mirrors the npm package behavior
     const paw = {
       async function(slugOrId, opts = {}) {
@@ -30,17 +27,54 @@
         const detailResp = await fetch(`${API_URL}/programs/${programId}`);
         if (!detailResp.ok) throw new Error(`Failed to load program: ${detailResp.status}`);
         const detail = await detailResp.json();
-        if (detail.interpreter !== 'gpt2') throw new Error(`Browser only supports GPT-2, got "${detail.interpreter}"`);
+        const runtime = detail.runtime || (
+          detail.runtime_id
+            ? await fetch(`${API_URL}/models/runtimes/${encodeURIComponent(detail.runtime_id)}`).then(r => {
+                if (!r.ok) throw new Error(`Failed to load runtime: ${r.status}`);
+                return r.json();
+              })
+            : null
+        );
+        if (!runtime || !runtime.js_sdk || !runtime.js_sdk.supported) {
+          throw new Error(`Browser runtime unsupported for "${detail.runtime_id || detail.interpreter}"`);
+        }
 
         const meta = {
           program_id: detail.id,
           spec: detail.spec,
           interpreter: detail.interpreter,
           compiler_snapshot: detail.compiler_snapshot,
+          runtime_id: detail.runtime_id,
+          runtime,
         };
 
-        // Load prompt template from HF
-        const promptResp = await fetch(`${HF_BASE}/${HF_REPO}/resolve/main/${programId}/prompt_template.txt`);
+        async function waitForReady(url) {
+          for (let i = 0; i < 30; i++) {
+            const head = await fetch(url, { method: 'HEAD' });
+            if (head.status === 202) {
+              await new Promise(r => setTimeout(r, 2000));
+              continue;
+            }
+            if (head.ok) return;
+            throw new Error(`Asset not ready: ${url} (${head.status})`);
+          }
+          throw new Error(`Timed out waiting for asset: ${url}`);
+        }
+
+        const promptUrl = `${API_URL}/programs/${programId}/asset/prompt_template.txt`;
+        const adapterUrl = `${API_URL}/programs/${programId}/asset/${runtime.program_assets.adapter_filename || 'adapter.gguf'}`;
+        const prefixCacheUrl = runtime.program_assets.prefix_cache_filename
+          ? `${API_URL}/programs/${programId}/asset/${runtime.program_assets.prefix_cache_filename}`
+          : null;
+        const prefixTokensUrl = runtime.program_assets.prefix_tokens_filename
+          ? `${API_URL}/programs/${programId}/asset/${runtime.program_assets.prefix_tokens_filename}`
+          : null;
+
+        await waitForReady(promptUrl);
+        await waitForReady(adapterUrl);
+
+        // Load prompt template from API-owned asset path
+        const promptResp = await fetch(promptUrl);
         if (!promptResp.ok) throw new Error(`Failed to load prompt: ${promptResp.status}`);
         const promptTemplate = await promptResp.text();
 
@@ -52,7 +86,9 @@
             'multi-thread/wllama.wasm': `${WLLAMA_CDN}/multi-thread/wllama.wasm`,
           }, { suppressNativeLog: true });
 
-          const baseResp = await fetch('https://huggingface.co/programasweights/GPT2-GGUF-Q8_0/resolve/main/gpt2-q8_0.gguf');
+          const baseUrl = runtime.js_sdk.base_model.url
+            || `https://huggingface.co/${runtime.js_sdk.base_model.repo}/resolve/main/${runtime.js_sdk.base_model.file}`;
+          const baseResp = await fetch(baseUrl);
           const total = parseInt(baseResp.headers.get('content-length') || '0');
           const reader = baseResp.body.getReader();
           const chunks = [];
@@ -69,20 +105,21 @@
         }
 
         const wllama = window._wllama;
-        const adapterUrl = `${HF_BASE}/${HF_REPO}/resolve/main/${programId}/adapter.gguf`;
         const adapterId = await wllama.loadLoraAdapter(adapterUrl, { scale: opts.scale ?? 1.0 });
 
         // Load prefix cache
         let prefixTokenCount = 0;
         try {
-          const [cacheResp, tokResp] = await Promise.all([
-            fetch(`${HF_BASE}/${HF_REPO}/resolve/main/${programId}/prefix_cache.bin`),
-            fetch(`${HF_BASE}/${HF_REPO}/resolve/main/${programId}/prefix_tokens.json`),
-          ]);
-          if (cacheResp.ok && tokResp.ok) {
+          if (prefixCacheUrl && prefixTokensUrl) {
+            const [cacheResp, tokResp] = await Promise.all([
+              fetch(prefixCacheUrl),
+              fetch(prefixTokensUrl),
+            ]);
+            if (cacheResp.ok && tokResp.ok) {
             const cacheBlob = await cacheResp.blob();
             const tokens = await tokResp.json();
             prefixTokenCount = await wllama.loadSession(cacheBlob, tokens);
+            }
           }
         } catch {}
 
