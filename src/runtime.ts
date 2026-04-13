@@ -1,6 +1,5 @@
 import { Wllama } from '@wllama/wllama';
 import type { ProgramAssets, LoadOptions } from './types';
-import { getBaseModelUrl } from './loader';
 
 const WLLAMA_COMMIT = 'f8b7d6b28696d0f9575f82df7a54de3adc6ea49c';
 const PAW_WASM_CDN_BASE = `https://cdn.jsdelivr.net/gh/programasweights/wllama@${WLLAMA_COMMIT}/esm`;
@@ -11,29 +10,29 @@ const WASM_PATHS = {
 };
 
 let sharedWllama: Wllama | null = null;
-let loadedInterpreter: string | null = null;
+let loadedRuntimeId: string | null = null;
 
 async function getOrInitWllama(
-  interpreter: string,
+  baseModelUrl: string,
+  runtimeId: string,
+  nCtx: number,
   onProgress?: LoadOptions['onProgress']
 ): Promise<Wllama> {
-  if (sharedWllama && loadedInterpreter === interpreter) {
+  if (sharedWllama && loadedRuntimeId === runtimeId) {
     return sharedWllama;
   }
 
   if (sharedWllama) {
     await sharedWllama.exit();
     sharedWllama = null;
-    loadedInterpreter = null;
+    loadedRuntimeId = null;
   }
 
   const wllama = new Wllama(WASM_PATHS, {
     suppressNativeLog: true,
   });
 
-  const baseUrl = getBaseModelUrl(interpreter);
-
-  const resp = await fetch(baseUrl);
+  const resp = await fetch(baseModelUrl);
   if (!resp.ok) throw new Error(`Base model download failed: ${resp.status}`);
   const total = parseInt(resp.headers.get('content-length') || '0');
   const reader = resp.body!.getReader();
@@ -50,10 +49,10 @@ async function getOrInitWllama(
   }
   const blob = new Blob(chunks);
 
-  await wllama.loadModel([blob], { n_ctx: 2048 });
+  await wllama.loadModel([blob], { n_ctx: nCtx });
 
   sharedWllama = wllama;
-  loadedInterpreter = interpreter;
+  loadedRuntimeId = runtimeId;
   return wllama;
 }
 
@@ -81,22 +80,29 @@ export class PawFunction {
   }
 
   async init(onProgress?: LoadOptions['onProgress']): Promise<void> {
-    this.wllama = await getOrInitWllama(this.assets.meta.interpreter, onProgress);
+    this.wllama = await getOrInitWllama(
+      this.assets.baseModelUrl,
+      this.assets.runtime.runtime_id,
+      this.assets.runtime.local_sdk.n_ctx ?? 2048,
+      onProgress,
+    );
 
     this.adapterId = await this.wllama.loadLoraAdapter(this.assets.adapterUrl, {
       scale: this.scale,
     });
 
     try {
-      const [cacheResp, tokensResp] = await Promise.all([
-        fetch(this.assets.prefixCacheUrl),
-        fetch(this.assets.prefixTokensUrl),
-      ]);
+      if (this.assets.prefixCacheUrl && this.assets.prefixTokensUrl) {
+        const [cacheResp, tokensResp] = await Promise.all([
+          fetch(this.assets.prefixCacheUrl),
+          fetch(this.assets.prefixTokensUrl),
+        ]);
 
-      if (cacheResp.ok && tokensResp.ok) {
-        const cacheBlob = await cacheResp.blob();
-        const prefixTokens: number[] = await tokensResp.json();
-        this.prefixTokenCount = await (this.wllama as any).loadSession(cacheBlob, prefixTokens);
+        if (cacheResp.ok && tokensResp.ok) {
+          const cacheBlob = await cacheResp.blob();
+          const prefixTokens: number[] = await tokensResp.json();
+          this.prefixTokenCount = await (this.wllama as any).loadSession(cacheBlob, prefixTokens);
+        }
       }
     } catch {
       this.prefixTokenCount = 0;

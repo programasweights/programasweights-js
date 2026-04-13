@@ -10,18 +10,62 @@ vi.stubGlobal('fetch', vi.fn());
 
 const MOCK_ASSETS: ProgramAssets = {
   meta: {
-    version: 3,
+    version: 4,
     program_id: 'abc123def456789a',
     spec: 'test spec',
     interpreter: 'gpt2',
-    compiler_snapshot: 'paw-4b-gpt2-20260323',
+    compiler_snapshot: 'paw-4b-gpt2-20260406',
     compiler_fingerprint: 'deadbeef',
+    runtime_id: 'gpt2-q8_0',
+    runtime_manifest_version: 1,
     lora_rank: 64,
     lora_alpha: 16,
     prefix_steps: 512,
     created_at: '2026-01-01T00:00:00Z',
   },
+  runtime: {
+    runtime_id: 'gpt2-q8_0',
+    manifest_version: 1,
+    display_name: 'GPT-2 124M (Q8_0)',
+    interpreter: 'gpt2',
+    inference_provider_url: 'http://localhost:9001',
+    adapter_format: 'gguf_lora',
+    prompt_template: { format: 'rendered_text', placeholder: '{INPUT_PLACEHOLDER}' },
+    program_assets: {
+      adapter_filename: 'adapter.gguf',
+      prefix_cache_required: true,
+      prefix_cache_filename: 'prefix_cache.bin',
+      prefix_tokens_filename: 'prefix_tokens.json',
+    },
+    local_sdk: {
+      supported: true,
+      base_model: {
+        provider: 'huggingface',
+        repo: 'programasweights/GPT2-GGUF-Q8_0',
+        file: 'gpt2-q8_0.gguf',
+        url: 'https://example.com/gpt2-q8_0.gguf',
+        sha256: null,
+      },
+      n_ctx: 2048,
+    },
+    js_sdk: {
+      supported: true,
+      base_model: {
+        provider: 'huggingface',
+        repo: 'programasweights/GPT2-GGUF-Q8_0',
+        file: 'gpt2-q8_0.gguf',
+        url: 'https://example.com/gpt2-q8_0.gguf',
+        sha256: null,
+      },
+      prefix_cache_supported: true,
+    },
+    capabilities: {
+      python_local: true,
+      js_browser: true,
+    },
+  },
   promptTemplate: 'Process: {INPUT_PLACEHOLDER}\nOutput:',
+  baseModelUrl: 'https://example.com/gpt2-q8_0.gguf',
   adapterUrl: 'https://example.com/adapter.gguf',
   prefixCacheUrl: 'https://example.com/prefix_cache.bin',
   prefixTokensUrl: 'https://example.com/prefix_tokens.json',
@@ -66,6 +110,12 @@ describe('PawFunction constructor', () => {
     expect(fn.spec).toBe('test spec');
     expect(fn.programId).toBe('abc123def456789a');
     expect(fn.interpreter).toBe('gpt2');
+  });
+
+  it('stores runtime-aware assets', () => {
+    const fn = new PawFunction(MOCK_ASSETS);
+    expect((fn as any).assets.runtime.runtime_id).toBe('gpt2-q8_0');
+    expect((fn as any).assets.baseModelUrl).toContain('gpt2-q8_0.gguf');
   });
 });
 

@@ -1,15 +1,9 @@
-import type { ProgramAssets, ProgramMeta, ProgressCallback } from './types';
+import type { ProgramAssets, ProgramMeta, ProgressCallback, RuntimeBaseModel, RuntimeManifest } from './types';
 
 const DEFAULT_API_URL = 'https://programasweights.com/api/v1';
-const HF_PROGRAMS_REPO = 'programasweights/paw-programs';
 const HF_BASE_URL = 'https://huggingface.co';
-
-const HF_BASE_MODELS: Record<string, { repo: string; file: string }> = {
-  gpt2: {
-    repo: 'programasweights/GPT2-GGUF-Q8_0',
-    file: 'gpt2-q8_0.gguf',
-  },
-};
+const ASSET_READY_TIMEOUT_MS = 60_000;
+const ASSET_READY_POLL_MS = 2_000;
 
 let configuredApiUrl = DEFAULT_API_URL;
 
@@ -17,39 +11,114 @@ export function setApiUrl(url: string): void {
   configuredApiUrl = url.replace(/\/+$/, '');
 }
 
-export function getBaseModelHFInfo(interpreter: string): { repo: string; file: string } {
-  const info = HF_BASE_MODELS[interpreter];
-  if (!info) {
-    throw new Error(
-      `Unsupported interpreter for browser inference: "${interpreter}". Only GPT-2 is supported.`
-    );
+function buildHFUrl(info: RuntimeBaseModel): string {
+  if (info.url) {
+    return info.url;
   }
-  return info;
-}
-
-export function getBaseModelUrl(interpreter: string): string {
-  const info = getBaseModelHFInfo(interpreter);
   return `${HF_BASE_URL}/${info.repo}/resolve/main/${info.file}`;
 }
 
-export function getAdapterUrl(programId: string): string {
-  return `${HF_BASE_URL}/${HF_PROGRAMS_REPO}/resolve/main/${programId}/adapter.gguf`;
+function getLegacyRuntimeManifest(interpreter: string): RuntimeManifest | null {
+  if (interpreter !== 'gpt2') {
+    return null;
+  }
+  return {
+    runtime_id: 'gpt2-q8_0',
+    manifest_version: 1,
+    display_name: 'GPT-2 124M (Q8_0)',
+    interpreter: 'gpt2',
+    inference_provider_url: 'http://localhost:9001',
+    adapter_format: 'gguf_lora',
+    prompt_template: {
+      format: 'rendered_text',
+      placeholder: '{INPUT_PLACEHOLDER}',
+    },
+    program_assets: {
+      adapter_filename: 'adapter.gguf',
+      prefix_cache_required: true,
+      prefix_cache_filename: 'prefix_cache.bin',
+      prefix_tokens_filename: 'prefix_tokens.json',
+    },
+    local_sdk: {
+      supported: true,
+      base_model: {
+        provider: 'huggingface',
+        repo: 'programasweights/GPT2-GGUF-Q8_0',
+        file: 'gpt2-q8_0.gguf',
+        url: `${HF_BASE_URL}/programasweights/GPT2-GGUF-Q8_0/resolve/main/gpt2-q8_0.gguf`,
+        sha256: null,
+      },
+      n_ctx: 2048,
+    },
+    js_sdk: {
+      supported: true,
+      base_model: {
+        provider: 'huggingface',
+        repo: 'programasweights/GPT2-GGUF-Q8_0',
+        file: 'gpt2-q8_0.gguf',
+        url: `${HF_BASE_URL}/programasweights/GPT2-GGUF-Q8_0/resolve/main/gpt2-q8_0.gguf`,
+        sha256: null,
+      },
+      prefix_cache_supported: true,
+    },
+    capabilities: {
+      python_local: true,
+      js_browser: true,
+    },
+  };
 }
 
-function getMetaUrl(programId: string): string {
-  return `${HF_BASE_URL}/${HF_PROGRAMS_REPO}/resolve/main/${programId}/meta.json`;
+export function getBaseModelUrl(runtime: RuntimeManifest): string {
+  const info = runtime.js_sdk.base_model;
+  if (!info) {
+    throw new Error(
+      `Runtime "${runtime.runtime_id}" is missing a browser base model definition.`
+    );
+  }
+  return buildHFUrl(info);
 }
 
-function getPromptUrl(programId: string): string {
-  return `${HF_BASE_URL}/${HF_PROGRAMS_REPO}/resolve/main/${programId}/prompt_template.txt`;
+function getProgramAssetUrl(programId: string, filename: string): string {
+  return `${configuredApiUrl}/programs/${encodeURIComponent(programId)}/asset/${encodeURIComponent(filename)}`;
 }
 
-export function getPrefixCacheUrl(programId: string): string {
-  return `${HF_BASE_URL}/${HF_PROGRAMS_REPO}/resolve/main/${programId}/prefix_cache.bin`;
+function getProgramUrl(programId: string): string {
+  return `${configuredApiUrl}/programs/${encodeURIComponent(programId)}`;
 }
 
-export function getPrefixTokensUrl(programId: string): string {
-  return `${HF_BASE_URL}/${HF_PROGRAMS_REPO}/resolve/main/${programId}/prefix_tokens.json`;
+function getPromptUrl(programId: string, promptFilename = 'prompt_template.txt'): string {
+  return getProgramAssetUrl(programId, promptFilename);
+}
+
+export async function getRuntimeManifest(runtimeId: string): Promise<RuntimeManifest> {
+  const resp = await fetch(`${configuredApiUrl}/models/runtimes/${encodeURIComponent(runtimeId)}`);
+  if (!resp.ok) {
+    throw new Error(`Failed to load runtime manifest "${runtimeId}": ${resp.status}`);
+  }
+  return resp.json();
+}
+
+export async function resolveRuntimeManifest(meta: ProgramMeta): Promise<RuntimeManifest> {
+  if (meta.runtime?.js_sdk?.base_model || meta.runtime?.js_sdk?.supported) {
+    return meta.runtime;
+  }
+
+  if (meta.runtime_id) {
+    try {
+      return await getRuntimeManifest(meta.runtime_id);
+    } catch {
+      // Fall through to the legacy map for older installed SDKs and bundles.
+    }
+  }
+
+  const legacy = getLegacyRuntimeManifest(meta.interpreter);
+  if (legacy) {
+    return legacy;
+  }
+
+  throw new Error(
+    `Browser inference does not support runtime "${meta.runtime_id || meta.interpreter}".`
+  );
 }
 
 export async function resolveSlug(slug: string): Promise<string> {
@@ -61,36 +130,105 @@ export async function resolveSlug(slug: string): Promise<string> {
   return data.program_id;
 }
 
+async function getProgramDetail(programId: string): Promise<any> {
+  const resp = await fetch(getProgramUrl(programId));
+  if (!resp.ok) {
+    throw new Error(`Failed to load program metadata for "${programId}": ${resp.status}`);
+  }
+  return resp.json();
+}
+
+async function waitForAssetReady(url: string, label: string, optional = false): Promise<void> {
+  const deadline = Date.now() + ASSET_READY_TIMEOUT_MS;
+  let lastStatus = 0;
+  while (Date.now() < deadline) {
+    const resp = await fetch(url, { method: 'HEAD' });
+    lastStatus = resp.status;
+    if (resp.status === 202) {
+      await new Promise(resolve => setTimeout(resolve, ASSET_READY_POLL_MS));
+      continue;
+    }
+    if (resp.ok) {
+      return;
+    }
+    if (optional && resp.status === 404) {
+      return;
+    }
+    throw new Error(`Failed to load ${label}: ${resp.status}`);
+  }
+  throw new Error(`Timed out waiting for ${label} to be ready (last status: ${lastStatus})`);
+}
+
 export async function loadProgramAssets(
   programId: string,
   _onProgress?: ProgressCallback
 ): Promise<ProgramAssets> {
-  const [metaResp, promptResp] = await Promise.all([
-    fetch(getMetaUrl(programId)),
-    fetch(getPromptUrl(programId)),
-  ]);
+  const detail = await getProgramDetail(programId);
+  const meta: ProgramMeta = {
+    version: detail.runtime_manifest_version ?? 4,
+    program_id: detail.id,
+    spec: detail.spec,
+    examples: detail.runtime?.examples ?? detail.examples,
+    interpreter: detail.interpreter,
+    compiler_snapshot: detail.compiler_snapshot,
+    compiler_fingerprint: detail.compiler_fingerprint ?? '',
+    compiler_kind: detail.compiler_kind,
+    pseudo_program_strategy: detail.pseudo_program_strategy,
+    runtime_id: detail.runtime_id,
+    runtime_manifest_version: detail.runtime_manifest_version,
+    runtime: detail.runtime,
+    lora_rank: detail.runtime?.adapter?.lora_rank ?? 0,
+    lora_alpha: detail.runtime?.adapter?.lora_alpha ?? 0,
+    prefix_steps: detail.prefix_steps ?? 0,
+    created_at: detail.created_at,
+  };
+  const runtime = await resolveRuntimeManifest(meta);
 
-  if (!metaResp.ok) {
-    throw new Error(`Failed to load program metadata for "${programId}": ${metaResp.status}`);
-  }
-  if (!promptResp.ok) {
-    throw new Error(`Failed to load prompt template for "${programId}": ${promptResp.status}`);
-  }
-
-  const meta: ProgramMeta = await metaResp.json();
-  const promptTemplate = await promptResp.text();
-
-  if (meta.interpreter !== 'gpt2') {
+  if (!runtime.js_sdk.supported) {
     throw new Error(
-      `Browser inference only supports GPT-2 programs. This program uses "${meta.interpreter}".`
+      `Browser inference does not support runtime "${runtime.runtime_id}" (${runtime.interpreter}).`
     );
   }
 
+  const hydratedMeta: ProgramMeta = {
+    ...meta,
+    runtime,
+    runtime_id: meta.runtime_id ?? runtime.runtime_id,
+    runtime_manifest_version: meta.runtime_manifest_version ?? runtime.manifest_version,
+  };
+
+  const adapterUrl = getProgramAssetUrl(
+    programId,
+    runtime.program_assets.adapter_filename || 'adapter.gguf'
+  );
+  const promptUrl = getPromptUrl(
+    programId,
+    typeof runtime.prompt_template?.filename === 'string'
+      ? runtime.prompt_template.filename
+      : 'prompt_template.txt'
+  );
+  const prefixCacheUrl = runtime.program_assets.prefix_cache_filename
+    ? getProgramAssetUrl(programId, runtime.program_assets.prefix_cache_filename)
+    : null;
+  const prefixTokensUrl = runtime.program_assets.prefix_tokens_filename
+    ? getProgramAssetUrl(programId, runtime.program_assets.prefix_tokens_filename)
+    : null;
+
+  await waitForAssetReady(adapterUrl, 'adapter');
+  await waitForAssetReady(promptUrl, 'prompt template');
+  const promptResp = await fetch(promptUrl);
+  if (!promptResp.ok) {
+    throw new Error(`Failed to load prompt template for "${programId}": ${promptResp.status}`);
+  }
+  const promptTemplate = await promptResp.text();
+
   return {
-    meta,
+    meta: hydratedMeta,
+    runtime,
     promptTemplate,
-    adapterUrl: getAdapterUrl(programId),
-    prefixCacheUrl: getPrefixCacheUrl(programId),
-    prefixTokensUrl: getPrefixTokensUrl(programId),
+    baseModelUrl: getBaseModelUrl(runtime),
+    adapterUrl,
+    prefixCacheUrl,
+    prefixTokensUrl,
   };
 }

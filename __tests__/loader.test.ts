@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  resolveSlug, loadProgramAssets, getBaseModelUrl, getAdapterUrl,
-  setApiUrl, getPrefixCacheUrl, getPrefixTokensUrl, getBaseModelHFInfo,
+  resolveSlug, loadProgramAssets, getBaseModelUrl,
+  setApiUrl, getRuntimeManifest, resolveRuntimeManifest,
 } from '../src/loader';
+import type { RuntimeManifest } from '../src/types';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -13,63 +14,130 @@ beforeEach(() => {
 });
 
 const GPT2_META = {
-  version: 3,
+  version: 4,
   program_id: 'abc123def456',
   spec: 'test spec',
   interpreter: 'gpt2',
-  compiler_snapshot: 'paw-4b-gpt2-20260323',
+  compiler_snapshot: 'paw-4b-gpt2-20260406',
   compiler_fingerprint: 'deadbeef',
+  runtime_id: 'gpt2-q8_0',
+  runtime_manifest_version: 1,
   lora_rank: 64,
   lora_alpha: 16,
   prefix_steps: 512,
   created_at: '2026-01-01T00:00:00Z',
 };
 
+const GPT2_RUNTIME: RuntimeManifest = {
+  runtime_id: 'gpt2-q8_0',
+  manifest_version: 1,
+  display_name: 'GPT-2 124M (Q8_0)',
+  interpreter: 'gpt2',
+  inference_provider_url: 'http://localhost:9001',
+  adapter_format: 'gguf_lora',
+  prompt_template: { format: 'rendered_text', placeholder: '{INPUT_PLACEHOLDER}' },
+  program_assets: {
+    adapter_filename: 'adapter.gguf',
+    prefix_cache_required: true,
+    prefix_cache_filename: 'prefix_cache.bin',
+    prefix_tokens_filename: 'prefix_tokens.json',
+  },
+  local_sdk: {
+    supported: true,
+    base_model: {
+      provider: 'huggingface',
+      repo: 'programasweights/GPT2-GGUF-Q8_0',
+      file: 'gpt2-q8_0.gguf',
+      url: 'https://huggingface.co/programasweights/GPT2-GGUF-Q8_0/resolve/main/gpt2-q8_0.gguf',
+      sha256: null,
+    },
+    n_ctx: 2048,
+  },
+  js_sdk: {
+    supported: true,
+    base_model: {
+      provider: 'huggingface',
+      repo: 'programasweights/GPT2-GGUF-Q8_0',
+      file: 'gpt2-q8_0.gguf',
+      url: 'https://huggingface.co/programasweights/GPT2-GGUF-Q8_0/resolve/main/gpt2-q8_0.gguf',
+      sha256: null,
+    },
+    prefix_cache_supported: true,
+  },
+  capabilities: {
+    python_local: true,
+    js_browser: true,
+  },
+};
+
 // ── URL construction ──
 
 describe('getBaseModelUrl', () => {
-  it('returns correct URL for gpt2', () => {
-    const url = getBaseModelUrl('gpt2');
+  it('returns correct URL for a runtime manifest', () => {
+    const url = getBaseModelUrl(GPT2_RUNTIME);
     expect(url).toBe(
       'https://huggingface.co/programasweights/GPT2-GGUF-Q8_0/resolve/main/gpt2-q8_0.gguf'
     );
   });
 
-  it('throws for unsupported interpreter', () => {
-    expect(() => getBaseModelUrl('llama-70b')).toThrow('Unsupported interpreter');
-  });
-
-  it('throws for empty interpreter', () => {
-    expect(() => getBaseModelUrl('')).toThrow('Unsupported interpreter');
-  });
-
-  it('getBaseModelHFInfo returns repo and file', () => {
-    const info = getBaseModelHFInfo('gpt2');
-    expect(info.repo).toContain('GPT2');
-    expect(info.file).toContain('gguf');
+  it('throws when a runtime lacks a browser base model', () => {
+    const runtime = {
+      ...GPT2_RUNTIME,
+      js_sdk: { ...GPT2_RUNTIME.js_sdk, base_model: null },
+    };
+    expect(() => getBaseModelUrl(runtime)).toThrow('missing a browser base model');
   });
 });
 
-describe('getAdapterUrl', () => {
-  it('constructs correct HF URL', () => {
-    const url = getAdapterUrl('abc123');
-    expect(url).toBe(
-      'https://huggingface.co/programasweights/paw-programs/resolve/main/abc123/adapter.gguf'
+describe('resolveRuntimeManifest', () => {
+  it('uses embedded runtime manifest when present', async () => {
+    const runtime = await resolveRuntimeManifest({ ...GPT2_META, runtime: GPT2_RUNTIME });
+    expect(runtime.runtime_id).toBe('gpt2-q8_0');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('fetches runtime manifest by runtime_id when missing from meta', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => GPT2_RUNTIME,
+    });
+    const runtime = await resolveRuntimeManifest(GPT2_META);
+    expect(runtime.runtime_id).toBe('gpt2-q8_0');
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://programasweights.com/api/v1/models/runtimes/gpt2-q8_0'
     );
   });
-});
 
-describe('getPrefixCacheUrl', () => {
-  it('constructs correct URL', () => {
-    const url = getPrefixCacheUrl('abc123');
-    expect(url).toContain('abc123/prefix_cache.bin');
+  it('falls back to legacy gpt2 runtime when runtime endpoint fails', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
+    const runtime = await resolveRuntimeManifest(GPT2_META);
+    expect(runtime.runtime_id).toBe('gpt2-q8_0');
+    expect(runtime.js_sdk.supported).toBe(true);
+  });
+
+  it('rejects unsupported runtimes when neither manifest nor legacy fallback exists', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
+    await expect(resolveRuntimeManifest({
+      ...GPT2_META,
+      interpreter: 'Qwen/Qwen3-0.6B',
+      runtime_id: 'qwen3-0.6b-q6_k',
+    })).rejects.toThrow('does not support runtime');
   });
 });
 
-describe('getPrefixTokensUrl', () => {
-  it('constructs correct URL', () => {
-    const url = getPrefixTokensUrl('abc123');
-    expect(url).toContain('abc123/prefix_tokens.json');
+describe('getRuntimeManifest', () => {
+  it('loads a runtime manifest from the API', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => GPT2_RUNTIME,
+    });
+    const runtime = await getRuntimeManifest('gpt2-q8_0');
+    expect(runtime.runtime_id).toBe('gpt2-q8_0');
+  });
+
+  it('throws on runtime lookup failure', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+    await expect(getRuntimeManifest('gpt2-q8_0')).rejects.toThrow('Failed to load runtime manifest');
   });
 });
 
@@ -182,56 +250,94 @@ describe('hash detection', () => {
 // ── loadProgramAssets ──
 
 describe('loadProgramAssets', () => {
-  it('loads meta and prompt from HF CDN', async () => {
-    mockFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => GPT2_META })
-      .mockResolvedValueOnce({ ok: true, text: async () => 'Hello {INPUT_PLACEHOLDER}' });
-
-    const assets = await loadProgramAssets('abc123def456');
-    expect(assets.meta).toEqual(GPT2_META);
-    expect(assets.promptTemplate).toBe('Hello {INPUT_PLACEHOLDER}');
-    expect(assets.adapterUrl).toContain('abc123def456/adapter.gguf');
-    expect(assets.prefixCacheUrl).toContain('abc123def456/prefix_cache.bin');
-    expect(assets.prefixTokensUrl).toContain('abc123def456/prefix_tokens.json');
-  });
-
-  it('rejects non-GPT-2 programs with clear message', async () => {
+  it('loads program detail, polls API assets, and returns runtime-aware URLs', async () => {
     mockFetch
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ ...GPT2_META, interpreter: 'Qwen/Qwen3-0.6B' }),
+        json: async () => ({
+          id: 'abc123def456',
+          spec: 'test spec',
+          interpreter: 'gpt2',
+          compiler_snapshot: 'paw-4b-gpt2-20260406',
+          runtime_id: 'gpt2-q8_0',
+          runtime_manifest_version: 1,
+          created_at: '2026-01-01T00:00:00Z',
+        }),
       })
-      .mockResolvedValueOnce({ ok: true, text: async () => 'template' });
+      .mockResolvedValueOnce({ ok: true, json: async () => GPT2_RUNTIME });
+      // HEAD adapter, HEAD prompt, HEAD cache, HEAD tokens, GET prompt
+      [200, 200].forEach((status) => {
+        mockFetch.mockResolvedValueOnce({ ok: status === 200, status });
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => 'Hello {INPUT_PLACEHOLDER}' });
 
-    try {
-      await loadProgramAssets('abc123');
-      expect.unreachable('should have thrown');
-    } catch (e: any) {
-      expect(e.message).toContain('only supports GPT-2');
-      expect(e.message).toContain('Qwen');
-    }
+    const assets = await loadProgramAssets('abc123def456');
+    expect(assets.meta.runtime_id).toBe('gpt2-q8_0');
+    expect(assets.promptTemplate).toBe('Hello {INPUT_PLACEHOLDER}');
+    expect(assets.baseModelUrl).toContain('GPT2-GGUF-Q8_0');
+    expect(assets.adapterUrl).toBe('https://programasweights.com/api/v1/programs/abc123def456/asset/adapter.gguf');
+    expect(assets.prefixCacheUrl).toBe('https://programasweights.com/api/v1/programs/abc123def456/asset/prefix_cache.bin');
+    expect(assets.prefixTokensUrl).toBe('https://programasweights.com/api/v1/programs/abc123def456/asset/prefix_tokens.json');
+  });
+
+  it('rejects runtimes without browser support', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'abc123',
+          spec: 'test spec',
+          interpreter: 'Qwen/Qwen3-0.6B',
+          compiler_snapshot: 'paw-4b-qwen3-0.6b-20260407',
+          runtime_id: 'qwen3-0.6b-q6_k',
+          runtime_manifest_version: 1,
+          created_at: '2026-01-01T00:00:00Z',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ...GPT2_RUNTIME,
+          runtime_id: 'qwen3-0.6b-q6_k',
+          interpreter: 'Qwen/Qwen3-0.6B',
+          js_sdk: { supported: false, base_model: null, prefix_cache_supported: false },
+        }),
+      });
+
+    await expect(loadProgramAssets('abc123')).rejects.toThrow('does not support runtime');
   });
 
   it('throws on meta fetch 404', async () => {
-    mockFetch
-      .mockResolvedValueOnce({ ok: false, status: 404 })
-      .mockResolvedValueOnce({ ok: true, text: async () => 'template' });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
 
     await expect(loadProgramAssets('abc123')).rejects.toThrow('Failed to load program metadata');
   });
 
   it('throws on meta fetch 500', async () => {
-    mockFetch
-      .mockResolvedValueOnce({ ok: false, status: 500 })
-      .mockResolvedValueOnce({ ok: true, text: async () => 'template' });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
 
     await expect(loadProgramAssets('abc123')).rejects.toThrow('500');
   });
 
-  it('throws on prompt template fetch failure', async () => {
+  it('throws on prompt template fetch failure after assets are ready', async () => {
     mockFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => GPT2_META })
-      .mockResolvedValueOnce({ ok: false, status: 404 });
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'abc123',
+          spec: 'test spec',
+          interpreter: 'gpt2',
+          compiler_snapshot: 'paw-4b-gpt2-20260406',
+          runtime_id: 'gpt2-q8_0',
+          runtime_manifest_version: 1,
+          created_at: '2026-01-01T00:00:00Z',
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => GPT2_RUNTIME });
+      [200, 200].forEach((status) => {
+        mockFetch.mockResolvedValueOnce({ ok: status === 200, status });
+      });
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
 
     await expect(loadProgramAssets('abc123')).rejects.toThrow('prompt template');
   });
